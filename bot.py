@@ -1,16 +1,24 @@
+from flask import Flask
+import threading
 import telebot
 import os
 
-# Get your bot token from the environment variables
-TOKEN = os.getenv("BOT_TOKEN")
-bot = telebot.TeleBot(TOKEN)
+# Bot setup
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+bot = telebot.TeleBot(BOT_TOKEN)
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "Hello! I'm alive on Railway! 🚀")
+# Flask setup
+app = Flask(__name__)
 
-@bot.message_handler(func=lambda message: True)
-def echo_all(message):
-    bot.reply_to(message, message.text)
+@app.route('/')
+def home():
+    return "✅ Bot is Alive!", 200
 
+# Run Flask in a separate thread
+def run_flask():
+    app.run(host="0.0.0.0", port=8080)
+
+threading.Thread(target=run_flask).start()
+
+# Start bot
 bot.infinity_polling()
