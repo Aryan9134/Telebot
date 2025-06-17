@@ -122,33 +122,3 @@ if __name__ == '__main__':
     bot.remove_webhook()
     bot.set_webhook(url=os.getenv("RENDER_WEBHOOK_URL"))
     app.run(host="0.0.0.0", port=10000)
-
-
-🚀 Your bot now supports everything:
-
-✅ Features Included:
-
-Anonymous 1-on-1 chat
-
-Language matching (English, Russian, Spanish, Italian, Korean, French)
-
-Gender filter (Male/Female/Any)
-
-VIP users can match with anyone regardless of preferences (upgrade logic ready)
-
-Inline menu system (Change language/gender, Start/Stop chat)
-
-Fully Flask-compatible for 24/7 hosting on Render with UptimeRobot
-
-
-Let me know when you want to:
-
-Enable VIP upgrades via payment 💰
-
-Store users persistently (e.g. MongoDB)
-
-Add message translation or moderation
-
-
-You're all set for launch!
-
