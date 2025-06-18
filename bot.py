@@ -1,124 +1,74 @@
-# telegram_chat_bot.py
-from flask import Flask, request
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import os
+import random
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from keep_alive import keep_alive
+from dotenv import load_dotenv
 
-API_TOKEN = os.getenv("BOT_TOKEN")
-bot = telebot.TeleBot(API_TOKEN)
-app = Flask(__name__)
+load_dotenv()
+TOKEN = os.getenv("TOKEN")
 
-# In-memory storage
 waiting_users = []
 active_chats = {}
-user_data = {}  # Stores gender, language, and VIP status
 
-LANGUAGES = ["English", "Russian", "Spanish", "Italian", "Korean", "French"]
-GENDERS = ["Male", "Female", "Any"]
-
-def main_menu():
-    markup = InlineKeyboardMarkup()
-    markup.row(
-        InlineKeyboardButton("\U0001F310 Change Language", callback_data="change_lang"),
-        InlineKeyboardButton("\U0001F46B Change Gender", callback_data="change_gender")
-    )
-    markup.row(
-        InlineKeyboardButton("\U0001F50D Start Chat", callback_data="start_chat"),
-        InlineKeyboardButton("\u274C Stop Chat", callback_data="stop_chat")
-    )
-    return markup
-
-def language_menu():
-    markup = InlineKeyboardMarkup()
-    for lang in LANGUAGES:
-        markup.add(InlineKeyboardButton(lang, callback_data=f"lang_{lang}"))
-    return markup
-
-def gender_menu():
-    markup = InlineKeyboardMarkup()
-    for gender in GENDERS:
-        markup.add(InlineKeyboardButton(gender, callback_data=f"gender_{gender}"))
-    return markup
-
-@bot.message_handler(commands=['start'])
-def start_handler(message):
-    user_id = message.chat.id
-    if user_id not in user_data:
-        user_data[user_id] = {"language": "English", "gender": "Any", "vip": False}
-    bot.send_message(user_id, "Welcome! Choose an option:", reply_markup=main_menu())
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("lang_"))
-def handle_language(call):
-    lang = call.data.split("_")[1]
-    user_data[call.from_user.id]["language"] = lang
-    bot.answer_callback_query(call.id, f"Language set to {lang}")
-    bot.edit_message_text("Language updated.", call.message.chat.id, call.message.message_id, reply_markup=main_menu())
-
-@bot.callback_query_handler(func=lambda call: call.data == "change_lang")
-def show_language_menu(call):
-    bot.edit_message_text("Choose your language:", call.message.chat.id, call.message.message_id, reply_markup=language_menu())
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("gender_"))
-def handle_gender(call):
-    gender = call.data.split("_")[1]
-    user_data[call.from_user.id]["gender"] = gender
-    bot.answer_callback_query(call.id, f"Gender preference set to {gender}")
-    bot.edit_message_text("Gender updated.", call.message.chat.id, call.message.message_id, reply_markup=main_menu())
-
-@bot.callback_query_handler(func=lambda call: call.data == "change_gender")
-def show_gender_menu(call):
-    bot.edit_message_text("Choose your gender preference:", call.message.chat.id, call.message.message_id, reply_markup=gender_menu())
-
-@bot.callback_query_handler(func=lambda call: call.data == "start_chat")
-def start_chat(call):
-    user_id = call.from_user.id
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     if user_id in active_chats:
-        bot.answer_callback_query(call.id, "You are already in a chat.")
+        await update.message.reply_text("You're already chatting! Send /stop to end it.")
         return
 
-    lang = user_data.get(user_id, {}).get("language", "English")
-    pref_gender = user_data.get(user_id, {}).get("gender", "Any")
-    vip = user_data.get(user_id, {}).get("vip", False)
+    if user_id in waiting_users:
+        await update.message.reply_text("You're already in the waiting queue...")
+        return
 
-    for waiting_id in waiting_users:
-        waiting_data = user_data.get(waiting_id, {})
-        if waiting_data.get("language") == lang:
-            if pref_gender == "Any" or waiting_data.get("gender") == pref_gender or vip:
-                waiting_users.remove(waiting_id)
-                active_chats[user_id] = waiting_id
-                active_chats[waiting_id] = user_id
-                bot.send_message(user_id, "\u2705 You're now connected! Say hi!")
-                bot.send_message(waiting_id, "\u2705 You're now connected! Say hi!")
-                return
+    if waiting_users:
+        partner_id = waiting_users.pop(0)
+        active_chats[user_id] = partner_id
+        active_chats[partner_id] = user_id
+        await context.bot.send_message(partner_id, "🎉 Connected to a stranger! Say hi!")
+        await update.message.reply_text("🎉 Connected to a stranger! Say hi!")
+    else:
+        waiting_users.append(user_id)
+        await update.message.reply_text("⏳ Waiting for a stranger to connect...")
 
-    waiting_users.append(user_id)
-    bot.send_message(user_id, "\u23F3 Waiting for someone to join...")
-
-@bot.callback_query_handler(func=lambda call: call.data == "stop_chat")
-def stop_chat(call):
-    user_id = call.from_user.id
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     partner_id = active_chats.pop(user_id, None)
     if partner_id:
         active_chats.pop(partner_id, None)
-        bot.send_message(partner_id, "\u26D4 The chat has been ended by the other user.", reply_markup=main_menu())
-    bot.send_message(user_id, "\u274C Chat ended.", reply_markup=main_menu())
+        await context.bot.send_message(partner_id, "❌ Stranger has left the chat.")
+        await update.message.reply_text("❌ You left the chat.")
+    elif user_id in waiting_users:
+        waiting_users.remove(user_id)
+        await update.message.reply_text("❌ You left the queue.")
+    else:
+        await update.message.reply_text("⚠️ You're not in a chat.")
 
-@bot.message_handler(func=lambda m: m.chat.id in active_chats)
-def relay_messages(message):
-    partner_id = active_chats.get(message.chat.id)
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    partner_id = active_chats.get(user_id)
     if partner_id:
-        bot.send_message(partner_id, message.text)
+        try:
+            if update.message.text:
+                await context.bot.send_message(partner_id, update.message.text)
+            elif update.message.sticker:
+                await context.bot.send_sticker(partner_id, update.message.sticker.file_id)
+            elif update.message.photo:
+                await context.bot.send_photo(partner_id, update.message.photo[-1].file_id)
+            elif update.message.video:
+                await context.bot.send_video(partner_id, update.message.video.file_id)
+            elif update.message.voice:
+                await context.bot.send_voice(partner_id, update.message.voice.file_id)
+        except Exception:
+            await update.message.reply_text("❌ Error delivering message.")
+    else:
+        await update.message.reply_text("⚠️ You're not in a chat. Use /start to find someone.")
 
-@app.route('/'+API_TOKEN, methods=['POST'])
-def webhook():
-    bot.process_new_updates([telebot.types.Update.de_json(request.stream.read().decode("utf-8"))])
-    return "", 200
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("stop", stop))
+app.add_handler(MessageHandler(filters.ALL, message_handler))
 
-@app.route('/')
-def home():
-    return "Bot is running."
-
-if __name__ == '__main__':
-    bot.remove_webhook()
-    bot.set_webhook(url=os.getenv("RENDER_WEBHOOK_URL"))
-    app.run(host="0.0.0.0", port=10000)
+keep_alive()
+print("Bot is running...")
+app.run_polling()
